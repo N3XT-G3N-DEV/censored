@@ -1,0 +1,32 @@
+```toml
+name = "text-generation-chat-ui"
+type = "javascript"  # or "typescript" if you are using TypeScript
+
+account_id = "c1a105ab87f34df0eeffdf6997e87d63"  # Provided Account ID
+workers_dev = true
+compatibility_date = "2024-05-17"
+
+# Define the main entry point for your Worker
+main = "src/index.js"  # or "src/index.ts" if you are using TypeScript
+
+# Define the build command and output directory if you are using a build tool
+[build]
+command = "npm run build"
+[build.upload]
+format = "service-worker"
+dir = "dist"
+
+# Define environment variables if needed
+[env.production]
+name = "text-generation-chat-ui-production"
+account_id = "c1a105ab87f34df0eeffdf6997e87d63"  # Provided Account ID
+route = "uncensored.no/*"  # Replace with your actual production domain and route pattern
+zone_id = "3bb2726fcf05dfd358c1fa6f33e228ad"  # Provided Zone ID
+
+# Define bindings for Workers AI
+[ai]
+binding = "AI"
+
+# Define any other settings or bindings as needed
+
+```
