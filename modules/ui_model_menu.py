@@ -8,7 +8,7 @@ from pathlib import Path
 import gradio as gr
 import psutil
 import torch
-from transformers import is_torch_xpu_available
+from transformers import is_torch_npu_available, is_torch_xpu_available
 
 from modules import loaders, shared, ui, utils
 from modules.logging_colors import logger
@@ -32,6 +32,9 @@ def create_ui():
     if is_torch_xpu_available():
         for i in range(torch.xpu.device_count()):
             total_mem.append(math.floor(torch.xpu.get_device_properties(i).total_memory / (1024 * 1024)))
+    elif is_torch_npu_available():
+        for i in range(torch.npu.device_count()):
+            total_mem.append(math.floor(torch.npu.get_device_properties(i).total_memory / (1024 * 1024)))
     else:
         for i in range(torch.cuda.device_count()):
             total_mem.append(math.floor(torch.cuda.get_device_properties(i).total_memory / (1024 * 1024)))
@@ -75,7 +78,7 @@ def create_ui():
         with gr.Row():
             with gr.Column():
                 shared.gradio['loader'] = gr.Dropdown(label="Model loader", choices=loaders.loaders_and_params.keys(), value=None)
-                with gr.Box():
+                with gr.Blocks():
                     with gr.Row():
                         with gr.Column():
                             with gr.Blocks():
@@ -90,7 +93,8 @@ def create_ui():
                                 shared.gradio['quant_type'] = gr.Dropdown(label="quant_type", choices=["nf4", "fp4"], value=shared.args.quant_type)
 
                             shared.gradio['hqq_backend'] = gr.Dropdown(label="hqq_backend", choices=["PYTORCH", "PYTORCH_COMPILE", "ATEN"], value=shared.args.hqq_backend)
-                            shared.gradio['n_gpu_layers'] = gr.Slider(label="n-gpu-layers", minimum=0, maximum=256, value=shared.args.n_gpu_layers, info='This must be set to more than 0 for your GPU to be used.')
+                            shared.gradio['cpp_runner'] = gr.Checkbox(label="cpp_runner", value=shared.args.cpp_runner, info='Use the ModelRunnerCpp runner for TensorRT-LLM, which is faster but doesn\'t support streaming.')
+                            shared.gradio['n_gpu_layers'] = gr.Slider(label="n-gpu-layers", minimum=0, maximum=256, value=shared.args.n_gpu_layers, info='Must be set to more than 0 for your GPU to be used.')
                             shared.gradio['n_ctx'] = gr.Slider(minimum=0, maximum=shared.settings['truncation_length_max'], step=256, label="n_ctx", value=shared.args.n_ctx, info='Context length. Try lowering this if you run out of memory while loading the model.')
                             shared.gradio['tensor_split'] = gr.Textbox(label='tensor_split', info='List of proportions to split the model across multiple GPUs. Example: 18,17')
                             shared.gradio['n_batch'] = gr.Slider(label="n_batch", minimum=1, maximum=2048, step=1, value=shared.args.n_batch)
@@ -115,6 +119,7 @@ def create_ui():
                             shared.gradio['load_in_4bit'] = gr.Checkbox(label="load-in-4bit", value=shared.args.load_in_4bit)
                             shared.gradio['use_double_quant'] = gr.Checkbox(label="use_double_quant", value=shared.args.use_double_quant)
                             shared.gradio['use_flash_attention_2'] = gr.Checkbox(label="use_flash_attention_2", value=shared.args.use_flash_attention_2, info='Set use_flash_attention_2=True while loading the model.')
+                            shared.gradio['flash-attn'] = gr.Checkbox(label="flash-attn", value=shared.args.flash_attn, info='Use flash-attention.')
                             shared.gradio['auto_devices'] = gr.Checkbox(label="auto-devices", value=shared.args.auto_devices)
                             shared.gradio['tensorcores'] = gr.Checkbox(label="tensorcores", value=shared.args.tensorcores, info='NVIDIA only: use llama-cpp-python compiled with tensor cores support. This increases performance on RTX cards.')
                             shared.gradio['streaming_llm'] = gr.Checkbox(label="streaming_llm", value=shared.args.streaming_llm, info='(experimental) Activate StreamingLLM to avoid re-evaluating the entire prompt when old messages are removed.')
@@ -138,7 +143,6 @@ def create_ui():
                             shared.gradio['autosplit'] = gr.Checkbox(label="autosplit", value=shared.args.autosplit, info='Automatically split the model tensors across the available GPUs.')
                             shared.gradio['no_flash_attn'] = gr.Checkbox(label="no_flash_attn", value=shared.args.no_flash_attn, info='Force flash-attention to not be used.')
                             shared.gradio['cfg_cache'] = gr.Checkbox(label="cfg-cache", value=shared.args.cfg_cache, info='Necessary to use CFG with this loader.')
-                            shared.gradio['cpp_runner'] = gr.Checkbox(label="cpp-runner", value=shared.args.cpp_runner, info='Enable inference with ModelRunnerCpp, which is faster than the default ModelRunner.')
                             shared.gradio['num_experts_per_token'] = gr.Number(label="Number of experts per token", value=shared.args.num_experts_per_token, info='Only applies to MoE models like Mixtral.')
                             with gr.Blocks():
                                 shared.gradio['trust_remote_code'] = gr.Checkbox(label="trust-remote-code", value=shared.args.trust_remote_code, info='Set trust_remote_code=True while loading the tokenizer/model. To enable this option, start the web UI with the --trust-remote-code flag.', interactive=shared.args.trust_remote_code)
@@ -289,6 +293,12 @@ def download_model_wrapper(repo_id, specific_file, progress=gr.Progress(), retur
 
         yield ("Getting the output folder")
         output_folder = downloader.get_output_folder(model, branch, is_lora, is_llamacpp=is_llamacpp)
+
+        if output_folder == Path("models"):
+            output_folder = Path(shared.args.model_dir)
+        elif output_folder == Path("loras"):
+            output_folder = Path(shared.args.lora_dir)
+
         if check:
             progress(0.5)
 
@@ -332,7 +342,7 @@ def update_truncation_length(current_length, state):
     if 'loader' in state:
         if state['loader'].lower().startswith('exllama'):
             return state['max_seq_len']
-        elif state['loader'] in ['llama.cpp', 'llamacpp_HF', 'ctransformers']:
+        elif state['loader'] in ['llama.cpp', 'llamacpp_HF']:
             return state['n_ctx']
 
     return current_length
